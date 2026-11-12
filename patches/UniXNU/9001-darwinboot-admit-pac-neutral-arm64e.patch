@@ -1,0 +1,23 @@
+--- a/drivers/DarwinBoot/DarwinBootPkg/Driver/DarwinBoot.c
++++ b/drivers/DarwinBoot/DarwinBootPkg/Driver/DarwinBoot.c
+@@ -136,10 +136,19 @@
+   if ((U32 (Data + 8) & 0xff) == 2) {
+     UINT64 Isar1 = READ_SYSREG (id_aa64isar1_el1);
+     // Both address and generic authentication are used by the native kernel.
+-    if (((Isar1 & 0xff0) == 0) || ((Isar1 & 0xff000000) == 0)) {
++    BOOLEAN HasPac = (((Isar1 & 0xff0) != 0) && ((Isar1 & 0xff000000) != 0));
++    // "NPAC" in mach_header_64.reserved: pac_neutralize.py replaced every PAC
++    // instruction outside the HINT space by its identity equivalent.
++    BOOLEAN PacNeutral = (U32 (Data + 28) == 0x4341504e);
++    if (!PacNeutral && !HasPac) {
+       Print (L"DARWINBOOT: ARM64E refused - architectural PAC unavailable\n");
+       return EFI_UNSUPPORTED;
+     }
++    if (PacNeutral && HasPac) {
++      // HINT-space PAC instructions remain in such an image and would sign with live keys.
++      Print (L"DARWINBOOT: PAC-neutral ARM64E refused - this CPU implements PAC\n");
++      return EFI_UNSUPPORTED;
++    }
+   }
+   if (U32 (Data + 20) > Size - 32) { return EFI_LOAD_ERROR; }
+   ZeroMem (Kernel, sizeof (*Kernel));

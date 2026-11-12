@@ -1,0 +1,60 @@
+name: q25 PAC fallback self-tests
+on:
+  workflow_dispatch:
+  push:
+    branches: [q25]
+    paths:
+      - 'q25/**'
+      - 'platform/sheng/macos26/pac/a64e/**'
+      - '.github/workflows/q25-tools.yml'
+permissions:
+  contents: read
+concurrency:
+  group: q25-tools-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  selftest:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Install test tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends clang lld llvm gcc-aarch64-linux-gnu \
+            libc6-dev-arm64-cross qemu-user-static 7zip
+      - name: Restore the pinned Kernel Debug Kit
+        id: kdk
+        uses: actions/cache@v4
+        with:
+          path: private/apple/Kernel_Debug_Kit_26.5_build_25F71.dmg
+          key: q25-kdk-${{ hashFiles('config/macos26.json') }}
+      - name: Download the pinned Kernel Debug Kit
+        if: steps.kdk.outputs.cache-hit != 'true'
+        run: python3 q25/tools/fetch_kdk.py config/macos26.json private/apple
+      - name: Unpack one kernel and two kernel extensions
+        run: |
+          7z e -y -o"$RUNNER_TEMP/pkg" private/apple/Kernel_Debug_Kit_26.5_build_25F71.dmg \
+            "Kernel Debug Kit/KernelDebugKit.pkg" > /dev/null
+          7z e -y -o"$RUNNER_TEMP/xar" "$RUNNER_TEMP/pkg/KernelDebugKit.pkg" KDK.pkg/Payload > /dev/null
+          rm -rf "$RUNNER_TEMP/pkg"
+          python3 q25/tools/kdk_extract.py extract "$RUNNER_TEMP/xar/Payload" "$RUNNER_TEMP/kdk" \
+            '^\./System/Library/Kernels/kernel\.release\.t8103$' \
+            '^\./System/Library/Extensions/(corecrypto|apfs)\.kext/Contents/MacOS/(corecrypto|apfs)$'
+          rm -rf "$RUNNER_TEMP/xar"
+      - name: Count pointer authentication instructions in the paired Apple kernel
+        run: |
+          python3 q25/tools/pac_neutralize.py scan "$RUNNER_TEMP/kdk/System/Library/Kernels/kernel.release.t8103" \
+            --json "$RUNNER_TEMP/kernel.release.t8103.scan.json"
+      - name: Run the self-tests
+        run: KDK_ROOT="$RUNNER_TEMP/kdk" bash q25/tests/run_all.sh
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: q25-pac-selftest
+          path: ${{ runner.temp }}/kernel.release.t8103.scan.json
+          if-no-files-found: warn
+          retention-days: 7

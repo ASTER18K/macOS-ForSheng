@@ -1,0 +1,72 @@
+diff --git a/osfmk/arm64/sleh.c b/osfmk/arm64/sleh.c
+index 905c291..ddaaf4c 100644
+--- a/osfmk/arm64/sleh.c
++++ b/osfmk/arm64/sleh.c
+@@ -1199,6 +1199,11 @@ sleh_synchronous(arm_context_t *context, uint64_t esr, vm_offset_t far, __unused
+ 	}
+ }
+ 
++#if SHENG && defined(HAS_APPLE_PAC)
++/* CPUs without pointer authentication: PAC instructions arrive here as undefined. */
++#include <arm64/sheng_a64e_kernel.h>
++#endif
++
+ /*
+  * Uncategorized exceptions are a catch-all for general execution errors.
+  * ARM64_TODO: For now, we assume this is for undefined instruction exceptions.
+@@ -1213,6 +1218,12 @@ handle_uncategorized(arm_saved_state_t *state)
+ 
+ 	COPYIN(get_saved_state_pc(state), (char *)&instr, sizeof(instr));
+ 
++#if SHENG && defined(HAS_APPLE_PAC)
++	if (sheng_a64e_undefined(state, instr)) {
++		return;
++	}
++#endif
++
+ #if CONFIG_DTRACE
+ 
+ 	if (PSR64_IS_USER64(get_saved_state_cpsr(state))) {
+diff --git a/osfmk/vm/vm_map.c b/osfmk/vm/vm_map.c
+index fd9e108..2212e27 100644
+--- a/osfmk/vm/vm_map.c
++++ b/osfmk/vm/vm_map.c
+@@ -22169,6 +22169,14 @@ unlock_and_return:
+ 	return phys_page;
+ }
+ 
++#if defined(__arm64__)
++#include <arm64/proc_reg.h>
++#if SHENG && defined(HAS_APPLE_PAC)
++/* CPUs without pointer authentication: replace a trapped PAC instruction in a resident text page. */
++#include <vm/sheng_a64e_vm.h>
++#endif
++#endif /* defined(__arm64__) */
++
+ #if CONFIG_MAP_RANGES
+ static bitmap_t vm_map_user_range_heap_map[BITMAP_LEN(VM_MEMORY_COUNT)];
+ static bitmap_t vm_map_user_range_large_file_map[BITMAP_LEN(VM_MEMORY_COUNT)];
+diff --git a/osfmk/vm/vm_map_xnu.h b/osfmk/vm/vm_map_xnu.h
+index 9d9e4a4..447f16a 100644
+--- a/osfmk/vm/vm_map_xnu.h
++++ b/osfmk/vm/vm_map_xnu.h
+@@ -1436,6 +1436,19 @@ bool vm_map_is_map_size_valid(vm_map_t target_map, vm_size_t size, bool no_soft_
+ /* Returns the map's ID or VM_MAP_SERIAL_NONE if the input map is NULL */
+ vm_map_serial_t vm_map_maybe_serial_id(vm_map_t maybe_vm_map);
+ 
++#if defined(__arm64__)
++/*
++ * SHENG, CPUs without pointer authentication: replace one trapped PAC
++ * instruction in a resident text page by its identity equivalent.
++ * Defined in vm/sheng_a64e_vm.h for ARM64E SHENG kernels only.
++ */
++extern bool sheng_a64e_patch_text(
++	vm_map_t                map,
++	vm_map_offset_t         addr,
++	uint32_t                old_word,
++	uint32_t                new_word);
++#endif /* defined(__arm64__) */
++
+ __END_DECLS
+ 
+ #endif /* XNU_KERNEL_PRIVATE */

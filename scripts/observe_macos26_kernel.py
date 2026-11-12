@@ -142,6 +142,8 @@ def main() -> None:
                         help='record IRQ latency violations and use finite one-second locks for TCG SMP')
     parser.add_argument('--smp', type=int, choices=(1, 2, 4, 8), default=1,
                         help='explicit CPU count; GOP requires the matching framebuffer ownership contract')
+    parser.add_argument('--qemu-cpu', default='cortex-a710',
+                        help='TCG CPU model with optional properties, for example cortex-a710,pauth=off or cortex-a76')
     parser.add_argument('--decode-existing-snapshot', action='store_true',
                         help='decode a saved snapshot without restarting QEMU')
     args = parser.parse_args()
@@ -355,7 +357,7 @@ def main() -> None:
             fdt = args.output.resolve() / 'qemu-block.dtb'
             fdt_command = ['qemu-system-aarch64', '-M',
                 f'virt,virtualization=off,secure=off,gic-version=3,dumpdtb={fdt}',
-                '-cpu', 'cortex-a710', '-m', str(args.qemu_memory_mib), '-smp', str(args.smp), '-nic', 'none', '-display', 'none',
+                '-cpu', args.qemu_cpu, '-m', str(args.qemu_memory_mib), '-smp', str(args.smp), '-nic', 'none', '-display', 'none',
                 '-global', 'virtio-mmio.force-legacy=false', '-blockdev', json.dumps(dict(
                     driver='raw', **{'node-name': 'root-disk', 'read-only': True}, file=dict(
                         driver='file', filename=str(disk), **{'read-only': True, 'locking': 'off'}))),
@@ -390,7 +392,8 @@ def main() -> None:
                    '--firmware', args.firmware.resolve(), '--gic-version', '3',
                    '--qemu-memory-mib', str(args.qemu_memory_mib), '--timeout', str(args.timeout),
                    '--system-registers', '--qemu-ramfb']
-        command += ['--smp', str(args.smp)]
+        command += ['--smp', str(args.smp), '--qemu-cpu', args.qemu_cpu]
+        record['qemu_cpu'] = args.qemu_cpu
         if args.stream_retained_log:
             command += ['--retained-log-address', hex(addresses['_sheng_log_buffer']),
                         '--retained-log-uuid', record['uuid']]

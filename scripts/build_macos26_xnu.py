@@ -290,6 +290,12 @@ def prepare() -> dict:
     smp_headers = ('smp_keys.h', 'smp_keys_storage.h')
     for name in smp_headers:
         stage_file(ROOT / 'platform/sheng/macos26/pac' / name, source / ('osfmk/arm64/sheng_' + name))
+    # Fallback for CPUs without pointer authentication. Only ARM64E kernels include these headers.
+    a64e_headers = {'a64e.h': 'osfmk/arm64/sheng_a64e.h', 'a64e_kernel.h': 'osfmk/arm64/sheng_a64e_kernel.h',
+                    'a64e_vm.h': 'osfmk/vm/sheng_a64e_vm.h'}
+    for name, destination in a64e_headers.items():
+        stage_file(ROOT / 'platform/sheng/macos26/pac/a64e' / name, source / destination)
+    subprocess.run(['git', '-C', source, 'add', '-N', *a64e_headers.values()], check=True)
     subprocess.run(['git', '-C', source, 'add', '-N', 'osfmk/prng/sheng_crypto_image.h', 'pexpert/pexpert/arm64/SHENG.h',
                     'pexpert/arm/pe_sheng_log.h', 'osfmk/arm64/sheng_early_exception.h',
                     'osfmk/arm64/sheng_bootstrap_sync.h', 'osfmk/arm64/sheng_bootstrap_trace.h',
@@ -371,6 +377,12 @@ def prepare() -> dict:
                   original_component_abi_qualified=False, hardware_executed=False,
                   source_diff_sha256=hashlib.sha256(subprocess.check_output(
                       ['git', '-C', source, 'diff', 'HEAD', '--binary'])).hexdigest())
+    record['a64e_fallback'] = dict(
+        compiled=ARCH == 'arm64e', boot_argument='sheng-a64e', modes={'0': 'off', '1': 'emulate', '2': 'patch'},
+        default_mode=2, acts_only_without_address_authentication=True,
+        source_sha256={name: sha(ROOT / 'platform/sheng/macos26/pac/a64e' / name) for name in a64e_headers},
+        kernel_text_requires_offline_rewrite='q25/tools/neutralize_build.py',
+        runtime_qualified=False, hardware_qualified=False)
     save(record)
     return record
 
@@ -673,6 +685,8 @@ def main() -> None:
         PATCHES.append(ROOT / 'platform/sheng/macos26/pac/0004-native-signing-window-failure.patch')
         PATCHES.append(ROOT / 'platform/sheng/macos26/pac/0005-native-user-a-key-policy.patch')
         PATCHES.append(ROOT / 'platform/sheng/macos26/pac/0006-native-smp-key-bootstrap.patch')
+        # CPUs without pointer authentication take PAC instructions as undefined; the logic lives in staged headers.
+        PATCHES.append(ROOT / 'platform/sheng/macos26/pac/a64e/0001-undefined-instruction-hook.patch')
     # Keep helpers on this configured module when invoked as a script.
     sys.modules['build_macos26_xnu'] = sys.modules[__name__]
     record = prepare()

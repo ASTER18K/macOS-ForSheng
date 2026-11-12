@@ -307,6 +307,23 @@ jobs:
             ${{ env.NATIVE_OUT }}/storage-driver/
             ${{ env.NATIVE_OUT }}/ufs-driver/
           retention-days: 7
+      # Diagnostic only: the native kernel without Apple components, rewritten for CPUs
+      # without pointer authentication. A boot candidate is rewritten after emit instead.
+      - name: Rewrite the native kernel for CPUs without pointer authentication
+        if: success() && inputs.target == 'macos26-kernel' && inputs.native_arch == 'arm64e'
+        continue-on-error: true
+        run: |
+          mkdir -p "$RUNNER_TEMP/npac-source"
+          cp "$NATIVE_OUT/build.json" "$NATIVE_OUT/kernel.development.sheng" \
+            "$NATIVE_OUT/kernel.development.sheng.map" "$RUNNER_TEMP/npac-source/"
+          python3 q25/tools/neutralize_build.py "$RUNNER_TEMP/npac-source" "$RUNNER_TEMP/npac"
+      - uses: actions/upload-artifact@v4
+        if: success() && inputs.target == 'macos26-kernel' && inputs.native_arch == 'arm64e'
+        with:
+          name: macos26-sheng-kernel-npac
+          path: ${{ runner.temp }}/npac/
+          if-no-files-found: warn
+          retention-days: 7
       - uses: actions/upload-artifact@v4
         if: always()
         with:
