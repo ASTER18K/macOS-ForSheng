@@ -54,6 +54,7 @@ LC_DATA_IN_CODE = 0x29
 LC_FILESET_ENTRY = 0x80000035
 S_ATTR_PURE_INSTRUCTIONS = 0x80000000
 S_ATTR_SOME_INSTRUCTIONS = 0x00000400
+VM_PROT_EXECUTE = 0x4
 ZEROFILL_TYPES = (0x1, 0xC, 0x12)
 
 HINT_NAMES = {
@@ -284,12 +285,19 @@ def find_images(data):
 
 
 def code_ranges(data, image):
-    """Yield (file offset, size, address, 'segment,section') for instruction sections."""
+    """Yield (file offset, size, address, 'segment,section') for instruction sections.
+
+    A section counts as code when it carries an instruction attribute, or when it is a
+    __text section of an executable segment. The second rule covers __KLD,__text in the
+    linked native kernel, whose flags are 0 although it holds ordinary compiled code.
+    """
     for segment in image.segments:
+        executable = segment.get("initprot", 0) & VM_PROT_EXECUTE
         for section in segment["sections"]:
             if (section["flags"] & 0xFF) in ZEROFILL_TYPES or not section["size"]:
                 continue
-            if not section["flags"] & (S_ATTR_PURE_INSTRUCTIONS | S_ATTR_SOME_INSTRUCTIONS):
+            if not (section["flags"] & (S_ATTR_PURE_INSTRUCTIONS | S_ATTR_SOME_INSTRUCTIONS)
+                    or (executable and section["name"] == "__text")):
                 continue
             offset = section["offset"]
             if not offset or offset + section["size"] > len(data):
