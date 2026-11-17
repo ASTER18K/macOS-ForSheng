@@ -345,10 +345,32 @@ def provider_hmac(data, offset, size):
 # Scan and rewrite
 
 
+def site_description(image, segment, at, word):
+    """Where an uncovered authenticated return sits: segment, enclosing section and flags."""
+    address = segment["vmaddr"] + at - segment["fileoff"]
+    entry = dict(image=image.label, segment=segment["name"], initprot=segment["initprot"],
+                 file_offset=at, address="%#x" % address, word="%#010x" % word,
+                 mnemonic="retaa" if word == 0xD65F0BFF else "retab", section=None)
+    for section in segment["sections"]:
+        if section["addr"] <= address < section["addr"] + section["size"]:
+            entry["section"] = section["name"]
+            entry["section_flags"] = "%#010x" % section["flags"]
+            break
+    return entry
+
+
+def describe_site(site):
+    section = site["section"] or "(no section)"
+    flags = (" flags %s" % site["section_flags"]) if site.get("section_flags") else ""
+    return "%s %s,%s%s initprot %d file %#x addr %s %s" % (
+        site["image"], site["segment"], section, flags, site["initprot"], site["file_offset"],
+        site["address"], site["mnemonic"])
+
+
 def process(data, rewrite):
     """Scan (and optionally rewrite in place) a bytearray. Returns the report."""
     report = dict(images=[], totals={}, unconvertible=[], hmac=[], changed_words=0,
-                  image_labels=[], uncovered_executable_returns=0)
+                  image_labels=[], uncovered_executable_returns=0, uncovered_return_sites=[])
     totals = report["totals"]
     ranges = []
     seals = []
@@ -439,9 +461,13 @@ def process(data, rewrite):
                 lo += (-lo) & 3
                 if hi - lo < 4:
                     continue
-                for w in struct.unpack_from("<%dI" % ((hi - lo) // 4), data, lo):
+                for index, w in enumerate(struct.unpack_from("<%dI" % ((hi - lo) // 4), data, lo)):
                     if w == 0xD65F0FFF or w == 0xD65F0BFF:
                         report["uncovered_executable_returns"] += 1
+                        if len(report["uncovered_return_sites"]) < 64:
+                            at = lo + 4 * index
+                            report["uncovered_return_sites"].append(
+                                site_description(image, segment, at, w))
     report["totals"] = dict(sorted(totals.items()))
     summary = {}
     for key, value in totals.items():
@@ -513,6 +539,8 @@ def main():
     if report["uncovered_executable_returns"]:
         print("  WARNING: %d authenticated returns in executable bytes that no instruction section covers"
               % report["uncovered_executable_returns"])
+        for site in report["uncovered_return_sites"][:20]:
+            print("    %s" % describe_site(site))
     for entry in report["hmac"]:
         if entry["text_file_offset"] is None:
             print("  integrity field in %s: %s" % (entry["image"], entry["reason"]))

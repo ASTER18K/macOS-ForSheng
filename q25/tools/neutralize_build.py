@@ -73,8 +73,10 @@ def main():
         raise SystemExit("%d authenticated loads have no one-instruction equivalent; "
                          "kernel text cannot be left to trap" % len(report["unconvertible"]))
     if report["uncovered_executable_returns"]:
+        sites = "".join("\n  " + pac_neutralize.describe_site(site)
+                        for site in report["uncovered_return_sites"][:20])
         raise SystemExit("%d authenticated returns lie outside every instruction section; "
-                         "some code was not located" % report["uncovered_executable_returns"])
+                         "some code was not located%s" % (report["uncovered_executable_returns"], sites))
     if relink is not None:
         embedded = len(report["image_labels"]) - 1
         expected = len(relink.get("modules", {})) + (1 if relink.get("storage_driver") else 0)
